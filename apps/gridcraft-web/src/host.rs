@@ -18,6 +18,9 @@
 //!   `saveAs` remains `false`; it does not distinguish Save from Save As here.
 //! - `gridcraft:dirty` whenever unsaved changes appear or go away, `gridcraft:failed` when the
 //!   app couldn't start.
+//! - `gridcraft:selection` (to the host): `{ sheet, selection, activeCell, rowKey }` whenever the
+//!   selection changes ([`crate::hostmode::SelectionNote`]); a drag tells where it ended. This one
+//!   is GridCraft's own, not part of the shared contract.
 //!
 //! With `?mode=view` the window is view-only (`Session::view_only`): nothing is saved, so the
 //! host gets no `gridcraft:save` and no `gridcraft:dirty` (sorting and filtering change the
@@ -36,7 +39,7 @@ use gridcraft_ui_egui::{Inbox, Services, SheetApp};
 use wasm_bindgen::JsValue;
 
 use crate::host_save::{SaveMessage, sync_saved};
-use crate::hostmode::open_name;
+use crate::hostmode::{SelectionNote, SelectionWatch, open_name, selection_note};
 
 /// The app id in the host messages (`gridcraft:ready`).
 const APP: &str = "gridcraft";
@@ -53,6 +56,8 @@ pub struct Bridge {
     save_target: Rc<SaveTarget>,
     /// Names of the files handed to the host since the last frame.
     saved: Rc<RefCell<Vec<String>>>,
+    /// What the host last heard about the selection (`gridcraft:selection`).
+    selection: Rc<RefCell<SelectionWatch>>,
 }
 
 impl Bridge {
@@ -72,7 +77,7 @@ impl Bridge {
             }
             Mode::Page => SaveTarget::Page(canvas.clone()),
         };
-        Some(Self { host: Rc::new(host), save_target: Rc::new(save_target), saved: Rc::default() })
+        Some(Self { host: Rc::new(host), save_target: Rc::new(save_target), saved: Rc::default(), selection: Rc::default() })
     }
 
     /// Send saved and exported files to the host instead of downloading them, and hear files
@@ -115,6 +120,18 @@ impl Bridge {
         }
     }
 
+    /// After each frame: the host hears the selection when it changed (`gridcraft:selection`).
+    /// `pointer_down` holds it back during a drag, which tells where it ended.
+    pub fn sync_selection(&self, app: &SheetApp, pointer_down: bool) {
+        // The watch is released before the send: a page host's listener runs inside it.
+        let note = self.selection.borrow_mut().note(selection_note(app), pointer_down);
+        if let Some(note) = note
+            && let Err(e) = self.save_target.post_selection(&note)
+        {
+            log::warn!("couldn't tell the page the selection: {e:?}");
+        }
+    }
+
     fn post_save(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
         let name = file_name(Some(path), "document");
         self.save_target.post(SaveMessage::new(&name, bytes)).map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))?;
@@ -131,14 +148,37 @@ impl Bridge {
     }
 }
 
-/// A save-only adapter: the pinned host crate's `post_save` cannot add app-specific fields.
-/// All other messages and transport detection still go through `Host`.
+/// The adapter for what the pinned host crate cannot send: a save with app-specific fields, and
+/// GridCraft's own `gridcraft:selection`. All other messages and transport detection still go
+/// through `Host`.
 enum SaveTarget {
     Parent { parent: web_sys::Window, origin: String },
     Page(web_sys::HtmlCanvasElement),
 }
 
 impl SaveTarget {
+    fn post_selection(&self, note: &SelectionNote) -> Result<(), JsValue> {
+        let kind = message_type(APP, "selection");
+        let payload = js_sys::Object::new();
+        let set = |key: &str, value: &str| js_sys::Reflect::set(&payload, &JsValue::from_str(key), &JsValue::from_str(value));
+        set("sheet", &note.sheet)?;
+        set("selection", &note.selection)?;
+        set("activeCell", &note.active_cell)?;
+        set("rowKey", &note.row_key)?;
+        match self {
+            Self::Parent { parent, origin } => {
+                set("type", &kind)?;
+                parent.post_message(&payload, origin)
+            }
+            Self::Page(canvas) => {
+                let init = web_sys::CustomEventInit::new();
+                init.set_detail(&payload.into());
+                let event = web_sys::CustomEvent::new_with_event_init_dict(&kind, &init)?;
+                canvas.dispatch_event(&event).map(|_| ())
+            }
+        }
+    }
+
     fn post(&self, save: SaveMessage<'_>) -> Result<(), JsValue> {
         let buffer = js_sys::Uint8Array::from(save.bytes).buffer();
         let kind = message_type(APP, Outgoing::Save.kind());

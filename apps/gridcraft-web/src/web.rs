@@ -187,6 +187,7 @@ impl eframe::App for WebShell {
         self.app.ui(ui);
         if let Some(bridge) = &self.bridge {
             bridge.sync(&mut self.app);
+            bridge.sync_selection(&self.app, ui.input(|i| i.pointer.any_down()));
         }
     }
 }
