@@ -77,6 +77,8 @@ Local test: `python3 -m http.server 8765` inside the folder, then open http://lo
   (whose Backstage view then never opens); `?chrome=notitlebar` or `?chrome=nofiletab` leave out just
   one. Use them when the host window already shows the file name and owns the files, so the sheet's
   own Open or Save As cannot replace what the host thinks is open. Everything stays on by default.
+- **View-only:** `?mode=view` on the iframe `src` shows workbooks for looking through, not for
+  editing: see [View-only windows](#view-only-windows-modeview).
 
 ### The parent bridge (`?host=parent`)
 
@@ -168,6 +170,37 @@ const { data } = await gridcraft.screenshot();          // the canvas as PNG (ba
 ```
 
 The API is there in every mode, with or without a host. Opening a workbook, handing a saved or exported file to the page, the file name and the unsaved flag stay with the host messages above.
+
+### View-only windows (`?mode=view`)
+
+`?mode=view` (alone, or with `?host=parent` or `data-host="page"`) makes the window view-only. It
+is set when the app starts and nothing in the app turns it off.
+
+- **Not drawn:** the title bar, the ribbon, the File tab and its Backstage view, the New sheet
+  button and the sheet tab menu. The cell and header menus list only what still runs.
+- **Still works:** selecting cells and ranges, copying, scrolling, zoom, Go To, Find (without
+  Replace), switching sheets, following a link, sorting, AutoFilter, column widths, Freeze Panes,
+  and Undo and Redo of those.
+- **Refused:** everything else. No edit starts (typing, F2, a double-click, the formula bar), and
+  pasting, deleting, filling, formatting, inserting or removing rows, columns and sheets, renaming
+  or moving a sheet, protecting, saving, exporting and printing are refused with a passing notice
+  ("This workbook is view-only."). There is no password to enter and nothing to unlock.
+- **The page is held to the same list.** `window.gridcraft.execute` runs queries (`sheet.read`,
+  `cell.get`, `document.inspect`…) and the commands above, and gets the same refusal for any
+  other. `gridcraft.commands()` reports a refused command as not enabled.
+- **Nothing is saved.** The host gets no `gridcraft:save` and no `gridcraft:dirty`: sorting and
+  filtering change the workbook only in the window. To show other data, send another
+  `gridcraft:open`. A file dropped on the window is not opened.
+
+The commands a view-only window runs, besides queries: `selection.set`, `selection.move`,
+`selection.next`, `selection.nextCorner`, `selection.row`, `selection.column`,
+`selection.currentRegion`, `edit.selectAll`, `edit.goTo`, `edit.goToSpecial`, `edit.find`,
+`edit.copy`, `edit.clearClipboard`, `edit.undo`, `edit.redo`, `sheet.activate`, `sheet.next`,
+`sheet.previous`, `window.activate`, `link.open`, `view.zoom`, `view.zoom100`,
+`view.zoomToSelection`, `view.freezePanes`, `view.freezeTopRow`, `view.freezeFirstColumn`,
+`view.unfreezePanes`, `data.sortAscending`, `data.sortDescending`, `data.sort`, `data.filter`,
+`data.filterBy`, `data.clearFilter`, `data.reapply`, `home.columnWidth`,
+`home.autofitColumnWidth` and `file.open`.
 
 ## Renderer selection
 

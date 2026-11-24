@@ -18,8 +18,13 @@ pub(super) fn find(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog) {
             crate::ribbon::shortcut(app, key, m);
         }
     }
+    // A view-only window finds but does not replace.
+    let tabs: &[&str] = if app.view_only() { &["Find"] } else { &["Find", "Replace"] };
+    if !tabs.contains(&d.tab.as_str()) {
+        d.tab = "Find".into();
+    }
     ui.horizontal(|ui| {
-        for tab in ["Find", "Replace"] {
+        for tab in tabs.iter().copied() {
             if ui.selectable_label(d.tab == tab, tab).clicked() {
                 d.tab = tab.into();
             }

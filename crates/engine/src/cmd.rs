@@ -90,7 +90,8 @@ impl CommandInfo {
 
 impl CommandSpec {
     pub fn info(&self, s: &Session) -> CommandInfo {
-        let e = (self.enabled)(s);
+        // A view-only session refuses the command before it asks whether it is enabled.
+        let e = if s.view_only && !crate::view_only::allows_spec(self) { Err(crate::view_only::REFUSED.to_string()) } else { (self.enabled)(s) };
         CommandInfo {
             id: self.id,
             label: self.label,

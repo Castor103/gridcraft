@@ -19,6 +19,10 @@
 //! - `gridcraft:dirty` whenever unsaved changes appear or go away, `gridcraft:failed` when the
 //!   app couldn't start.
 //!
+//! With `?mode=view` the window is view-only (`Session::view_only`): nothing is saved, so the
+//! host gets no `gridcraft:save` and no `gridcraft:dirty` (sorting and filtering change the
+//! workbook in memory, which is not something to save).
+//!
 //! In both host modes the page starts with an empty workbook instead of a sample, saves and PDF
 //! exports are handed to the page rather than downloaded, and `?author=` names the user for new
 //! notes and comments.
@@ -105,7 +109,10 @@ impl Bridge {
     pub fn sync(&self, app: &mut SheetApp) {
         let saved = std::mem::take(&mut *self.saved.borrow_mut());
         sync_saved(&saved, app);
-        self.host.post_dirty(app.session.documents().iter().any(|d| d.is_dirty()));
+        // A view-only window saves nothing, so it has no unsaved changes to report.
+        if !app.view_only() {
+            self.host.post_dirty(app.session.documents().iter().any(|d| d.is_dirty()));
+        }
     }
 
     fn post_save(&self, path: &str, bytes: &[u8]) -> Result<(), String> {

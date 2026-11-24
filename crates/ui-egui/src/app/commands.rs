@@ -3,6 +3,14 @@ use super::{
     formula_locale, i18n, json, now_ms, printing,
 };
 
+/// The dialogs a view-only window opens: those of the commands in
+/// `gridcraft_engine::view_only::ALLOWED`.
+const VIEW_ONLY_DIALOGS: &[&str] = &["find", "goTo", "goToSpecial", "sort", "columnWidth"];
+
+/// The menus' own entries (not command ids) that a view-only window keeps: they filter, follow a
+/// link or open the Column Width dialog.
+const VIEW_ONLY_ENTRIES: &[&str] = &["ui:filterValue", "ui:openLink", "ui:columnWidth"];
+
 impl SheetApp {
     /// Runs an engine command (or a UI command) and handles UI requests it makes.
     pub fn run(&mut self, id: &str, params: Json) -> Result<Json, String> {
@@ -375,7 +383,32 @@ impl SheetApp {
         self.session.active().and_then(|d| d.wb.active().map(|s| s.is_protected())).unwrap_or(false)
     }
 
+    /// Whether a host shows the workbooks for looking through only (`Session::view_only`): the
+    /// title bar, the ribbon and the File view are not drawn, no edit starts, and the menus list
+    /// only what the session still runs.
+    pub fn view_only(&self) -> bool {
+        self.session.view_only
+    }
+
+    /// Whether a menu lists the entry `id` (a command id, or a menu's own `ui:` id): every entry
+    /// in an ordinary window, and in a view-only one those the session still runs.
+    pub(crate) fn lists(&self, id: &str) -> bool {
+        !self.session.view_only || VIEW_ONLY_ENTRIES.contains(&id) || gridcraft_engine::view_only::allows(id)
+    }
+
+    /// Tells the person that the window is view-only, where a refused command would.
+    pub(crate) fn say_view_only(&mut self) {
+        self.toast = Some((gridcraft_engine::view_only::REFUSED.into(), now_ms()));
+    }
+
     pub fn open_dialog(&mut self, name: &str, params: Json) {
+        // A view-only window opens the dialogs of what it still does (Find, Go To, Sort, Column
+        // Width). Any other would only collect input for a command the session refuses, and
+        // Open or Save As would bring in or hand out a file the host did not ask for.
+        if self.session.view_only && !VIEW_ONLY_DIALOGS.contains(&name) {
+            self.say_view_only();
+            return;
+        }
         if let Err(e) = self.commit_text_box_edit() {
             self.message = Some(("Text Box".into(), clean_error(&e)));
             return;
@@ -464,7 +497,7 @@ impl SheetApp {
     /// Opens the File tab's Backstage view on `page`, committing a cell still being edited first
     /// (File actions work on the whole workbook). A draft that can't be committed keeps the sheet.
     pub fn open_backstage(&mut self, page: backstage::Page) {
-        if !self.chrome.file_tab {
+        if !self.chrome.file_tab || self.session.view_only {
             return;
         }
         if !self.commit_edit(0, 0, false, false) {
