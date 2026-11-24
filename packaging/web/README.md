@@ -93,6 +93,7 @@ downloading them. The two sides talk `postMessage` with plain window messages th
 | `gridcraft:open` | page → app | `name`, `bytes` (an `ArrayBuffer` or `Uint8Array`): open like File › Open |
 | `gridcraft:save` | app → page | `name`, `bytes` (a transferred `ArrayBuffer`): every file the app would otherwise download (Save, Save As, Export as PDF). The page stores it and reports failures itself. |
 | `gridcraft:dirty` | app → page | `dirty`: unsaved changes appeared or went away |
+| `gridcraft:selection` | app → page | `sheet`, `selection`, `activeCell`, `rowKey`: the selection changed (see [Hearing the selection](#hearing-the-selection-gridcraftselection)) |
 | `gridcraft:failed` | app → page | `error`: the app couldn't start |
 
 In host mode the app starts with an empty workbook instead of a sample, so the framing page
@@ -201,6 +202,35 @@ The commands a view-only window runs, besides queries: `selection.set`, `selecti
 `view.unfreezePanes`, `data.sortAscending`, `data.sortDescending`, `data.sort`, `data.filter`,
 `data.filterBy`, `data.clearFilter`, `data.reapply`, `home.columnWidth`,
 `home.autofitColumnWidth` and `file.open`.
+
+### Hearing the selection (`gridcraft:selection`)
+
+In both host modes the app tells the page whenever the selection changes, and once for each
+workbook it opens: a `gridcraft:selection` message to the parent (`?host=parent`), or a
+`CustomEvent` of that name on the canvas (`data-host="page"`) with the fields as its `detail`.
+
+| Field | What it holds |
+|---|---|
+| `sheet` | the active sheet's name |
+| `selection` | the selected areas in A1 notation: `B2:D5`, or `A1,C3` for several |
+| `activeCell` | the active cell in A1 notation |
+| `rowKey` | the text shown in column A of the active cell's row |
+
+A drag sends one message, when the button is released. Keyboard moves send one each.
+
+`rowKey` is for a page that needs to know which of its own records a row is. After a sort or a
+filter the sheet's row number no longer says, so put a key in column A (the record's number or
+id) and read it from `rowKey`. A sort that puts another row under the active cell sends a new
+message with that row's key.
+
+To select a row from the page and scroll to it, run `selection.set`:
+
+```js
+await gridcraft.execute("selection.set", { range: "A17:V17" });
+```
+
+This message is GridCraft's own. It is not part of the `craft-web-host` contract the other Craft
+apps share.
 
 ## Renderer selection
 

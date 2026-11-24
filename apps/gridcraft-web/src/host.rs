@@ -18,6 +18,9 @@
 //!   document, so `saveAs` is always `false`.
 //! - `gridcraft:dirty` whenever unsaved changes appear or go away, `gridcraft:failed` when the
 //!   app couldn't start.
+//! - `gridcraft:selection` (to the host): `{ sheet, selection, activeCell, rowKey }` whenever the
+//!   selection changes ([`crate::hostmode::SelectionNote`]); a drag tells where it ended. This one
+//!   is GridCraft's own, not part of the shared contract.
 //!
 //! With `?mode=view` the window is view-only (`Session::view_only`): nothing is saved, so the
 //! host gets no `gridcraft:save` and no `gridcraft:dirty` (sorting and filtering change the
@@ -31,9 +34,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use craft_web_host::web::{FileData, Host, Message};
+use craft_web_host::{Mode, message_type};
 use gridcraft_ui_egui::{Inbox, Services, SheetApp};
+use wasm_bindgen::JsValue;
 
-use crate::hostmode::open_name;
+use crate::hostmode::{SelectionNote, SelectionWatch, open_name, selection_note};
 
 /// The app id in the host messages (`gridcraft:ready`).
 const APP: &str = "gridcraft";
@@ -52,6 +57,9 @@ pub struct Bridge {
     host: Rc<Host>,
     /// Names of the files handed to the host since the last frame.
     saved: Rc<RefCell<Vec<String>>>,
+    /// Where `gridcraft:selection` goes, and what the host last heard.
+    notes: Rc<NoteTarget>,
+    selection: Rc<RefCell<SelectionWatch>>,
 }
 
 impl Bridge {
@@ -59,7 +67,17 @@ impl Bridge {
     /// `data-host="page"` on the canvas, an unframed `?host=parent` page (it stays the normal app
     /// with downloads), or a parent on another origin.
     pub fn detect(canvas: &web_sys::HtmlCanvasElement) -> Option<Self> {
-        Some(Self { host: Rc::new(Host::connect(APP, canvas)?), saved: Rc::default() })
+        let host = Host::connect(APP, canvas)?;
+        let notes = match host.mode() {
+            Mode::Parent => {
+                // `Host::connect` admitted only a same-origin parent. That origin is the
+                // `postMessage` target, so a parent that navigated away hears nothing.
+                let window = web_sys::window()?;
+                NoteTarget::Parent { parent: window.parent().ok().flatten()?, origin: window.location().origin().ok()? }
+            }
+            Mode::Page => NoteTarget::Page(canvas.clone()),
+        };
+        Some(Self { host: Rc::new(host), saved: Rc::default(), notes: Rc::new(notes), selection: Rc::default() })
     }
 
     /// Send saved and exported files to the host instead of downloading them, and hear files
@@ -109,6 +127,18 @@ impl Bridge {
         }
     }
 
+    /// After each frame: the host hears the selection when it changed (`gridcraft:selection`).
+    /// `pointer_down` holds it back during a drag, which tells where it ended.
+    pub fn sync_selection(&self, app: &SheetApp, pointer_down: bool) {
+        // The watch is released before the send: a page host's listener runs inside it.
+        let note = self.selection.borrow_mut().note(selection_note(app), pointer_down);
+        if let Some(note) = note
+            && let Err(e) = self.notes.post_selection(&note)
+        {
+            log::warn!("couldn't tell the page the selection: {e:?}");
+        }
+    }
+
     fn post_save(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
         let name = file_name(path);
         self.host.post_save(&name, bytes, None, false)?;
@@ -122,6 +152,37 @@ impl Bridge {
                 deliver_open(&inbox, &ctx, &name, &data);
             }
         });
+    }
+}
+
+/// Where GridCraft's own messages go: the same place and transport as `craft-web-host`'s, which
+/// sends only the messages of the shared contract.
+enum NoteTarget {
+    Parent { parent: web_sys::Window, origin: String },
+    Page(web_sys::HtmlCanvasElement),
+}
+
+impl NoteTarget {
+    fn post_selection(&self, note: &SelectionNote) -> Result<(), JsValue> {
+        let kind = message_type(APP, "selection");
+        let payload = js_sys::Object::new();
+        let set = |key: &str, value: &str| js_sys::Reflect::set(&payload, &JsValue::from_str(key), &JsValue::from_str(value));
+        set("sheet", &note.sheet)?;
+        set("selection", &note.selection)?;
+        set("activeCell", &note.active_cell)?;
+        set("rowKey", &note.row_key)?;
+        match self {
+            Self::Parent { parent, origin } => {
+                set("type", &kind)?;
+                parent.post_message(&payload, origin)
+            }
+            Self::Page(canvas) => {
+                let init = web_sys::CustomEventInit::new();
+                init.set_detail(&payload.into());
+                let event = web_sys::CustomEvent::new_with_event_init_dict(&kind, &init)?;
+                canvas.dispatch_event(&event).map(|_| ())
+            }
+        }
     }
 }
 
