@@ -283,7 +283,10 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                                     if resp.clicked() || (resp.secondary_clicked() && !active) {
                                         activate_sheet(app, i);
                                     }
-                                    if resp.double_clicked() {
+                                    // A view-only window renames, moves, adds and removes no sheet: no rename
+                                    // box, no tab menu and no New sheet button.
+                                    let view_only = app.view_only();
+                                    if resp.double_clicked() && !view_only {
                                         app.grid.renaming_tab = Some(i);
                                         app.grid.rename_text = name.clone();
                                     }
@@ -300,6 +303,9 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                                         if let Some(params) = tab_drop(i, steps, copy) {
                                             app.run_or_alert("sheet.move", params);
                                         }
+                                    }
+                                    if view_only {
+                                        continue;
                                     }
                                     resp.context_menu(|ui| {
                                         ui.set_min_width(180.0);
@@ -354,7 +360,9 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                         });
                 });
                 ui.add_space(6.0);
-                if crate::widgets::icon_button(ui, Icon::Plus, t.text_dim, app.ui.language.tr("New sheet (⇧F11)"), vec2(26.0, 26.0)).clicked() {
+                if !app.view_only()
+                    && crate::widgets::icon_button(ui, Icon::Plus, t.text_dim, app.ui.language.tr("New sheet (⇧F11)"), vec2(26.0, 26.0)).clicked()
+                {
                     app.run_or_alert("home.insertSheet", json!({}));
                 }
             }

@@ -211,22 +211,27 @@ impl SheetApp {
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, &ctx);
         let t = theme::Tokens::get(&ctx);
+        // A view-only window (`Session::view_only`) draws no title bar, ribbon or File view, and
+        // takes no key tips for them: what is left is the sheet to look through.
+        let view_only = self.view_only();
         // A host can turn the File tab off while Backstage is already open: close it.
-        if !self.chrome.file_tab {
+        if !self.chrome.file_tab || view_only {
             self.backstage = None;
         }
         // Keytips opened the File view (Alt, F): its letters keep working there.
-        if self.backstage.is_none() || self.keytips.prefix().is_some() {
+        if !view_only && (self.backstage.is_none() || self.keytips.prefix().is_some()) {
             self.ribbon_keys(&ctx);
         }
-        if self.chrome.title_bar {
+        if self.chrome.title_bar && !view_only {
             ribbon::title_bar(self, ui);
         }
         if self.backstage.is_some() {
             // File tab: the Backstage view replaces everything below the title bar.
             backstage::show(self, ui);
         } else {
-            ribbon::show(self, ui);
+            if !view_only {
+                ribbon::show(self, ui);
+            }
             widgets::notice_bar(self, ui);
             // Python mode edits only in the formula bar: it shows while a Python edit is open,
             // also when the preference hides it.

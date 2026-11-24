@@ -75,6 +75,9 @@ pub fn start() {
                             _ => {}
                         }
                     }
+                    // `?mode=view`: the page shows workbooks for looking through only. The session
+                    // then refuses every edit and save, and the window draws no ribbon.
+                    app.session.view_only = crate::hostmode::view_mode(query_param("mode").as_deref());
                     // Follow the browser's language, except a CJK one. CJK coverage comes from
                     // optional craft-fonts input, not a guaranteed web font set, so a CJK browser
                     // cannot be assumed to render localized labels without tofu. Users can still
@@ -143,7 +146,8 @@ fn stored(key: &str) -> Option<String> {
 impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
-        for f in dropped {
+        // A view-only window shows what its page gave it: a file dropped on it is not opened.
+        for f in dropped.into_iter().filter(|_| !self.app.view_only()) {
             let inbox = self.inbox.clone();
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {

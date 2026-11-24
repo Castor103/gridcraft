@@ -172,7 +172,7 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                 items.insert(i + 2, ("Show Details", "pivot.showDetails"));
             }
             let lang = crate::i18n::current(ui.ctx());
-            for (label, id) in items {
+            for (label, id) in view_only_items(app, items) {
                 if label == "-" {
                     ui.separator();
                     continue;
@@ -230,6 +230,28 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     {
         app.grid.context_menu = None;
     }
+}
+
+/// A menu's entries as a window lists them: all of them, or in a view-only window those the
+/// session still runs (`SheetApp::lists`), with no separator left first, last or doubled.
+fn view_only_items<'a>(app: &SheetApp, items: Vec<(&'a str, &'a str)>) -> Vec<(&'a str, &'a str)> {
+    if !app.view_only() {
+        return items;
+    }
+    let mut kept: Vec<(&str, &str)> = Vec::new();
+    for (label, id) in items {
+        let separator = label == "-";
+        if separator && kept.last().is_none_or(|(l, _)| *l == "-") {
+            continue;
+        }
+        if separator || app.lists(id) {
+            kept.push((label, id));
+        }
+    }
+    if kept.last().is_some_and(|(l, _)| *l == "-") {
+        kept.pop();
+    }
+    kept
 }
 
 /// Whether the cell menu offers Show Details (Excel's right-click › Show Details): the active cell
@@ -530,7 +552,7 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
                 items.insert(5, item);
             }
             let lang = crate::i18n::current(ui.ctx());
-            for (label, id) in items {
+            for (label, id) in view_only_items(app, items) {
                 if label == "-" {
                     ui.separator();
                     continue;

@@ -25,6 +25,7 @@ pub mod record;
 pub mod sample;
 pub mod selection;
 pub mod tables;
+pub mod view_only;
 pub mod windows;
 
 use std::sync::Arc;
@@ -534,6 +535,9 @@ pub struct Session {
     /// Whether `link.open` may open web and e-mail addresses without the user's confirmation
     /// (#2181). Host code sets it; no command does.
     pub link_policy: links::LinkPolicy,
+    /// A host shows the workbooks for looking through, not for editing: only queries and the
+    /// commands in [`view_only::ALLOWED`] run. Host code sets it; no command does.
+    pub view_only: bool,
     /// Open undo groups, innermost last.
     groups: Vec<OpenGroup>,
     next_group: u64,
@@ -686,6 +690,12 @@ impl Session {
     /// Panics inside commands are caught and reported; the workbook is restored.
     pub fn execute(&mut self, id: &str, params: Json) -> Result<Json> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // A view-only session runs queries and the commands that look around or arrange what is
+        // shown, whoever asks (a key, a menu, a host page). What such a command runs inside itself
+        // is its own work, so only the top-level call is checked.
+        if self.view_only && self.depth == 0 && !view_only::allows_spec(spec) {
+            return Err(EngineError::Disabled(id.to_string(), view_only::REFUSED.into()));
+        }
         if let Err(why) = (spec.enabled)(self) {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
