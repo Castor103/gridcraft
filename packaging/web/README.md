@@ -96,6 +96,7 @@ downloading them. The two sides talk `postMessage` with plain window messages th
 | `gridcraft:save` | app → page | `name`, `bytes` (a transferred `ArrayBuffer`): every file the app would otherwise download (Save, Save As, Export as PDF). The page stores it and reports failures itself. |
 | `gridcraft:dirty` | app → page | `dirty`: unsaved changes appeared or went away |
 | `gridcraft:selection` | app → page | `sheet`, `selection`, `activeCell`, `rowKey`: the selection changed (see [Hearing the selection](#hearing-the-selection-gridcraftselection)) |
+| `gridcraft:change` | app → page | `sheet`, `range`, `cells`, `truncated`, `rows`, `rowKey?`: a person changed cells (see [Hearing what changed](#hearing-what-changed-gridcraftchange)) |
 | `gridcraft:failed` | app → page | `error`: the app couldn't start |
 
 In host mode the app starts with an empty workbook instead of a sample, so the framing page
@@ -256,6 +257,30 @@ await gridcraft.execute("selection.set", { range: "A17:V17" });
 
 This message is GridCraft's own. It is not part of the `craft-web-host` contract the other Craft
 apps share.
+
+### Hearing what changed (`gridcraft:change`)
+
+In both host modes the app tells the page which cells a person changed: one `gridcraft:change`
+per command and sheet, after the command, as a message to the parent or a `CustomEvent` on the
+canvas, like `gridcraft:selection`.
+
+| Field | What it holds |
+|---|---|
+| `sheet` | the sheet's name |
+| `range` | the smallest range holding every changed cell, in A1 notation (`C7`, `B3:D9`) |
+| `cells` | the changed cells in A1 notation, in row order, at most 500 |
+| `truncated` | `true` when more cells changed than `cells` lists (`range` still covers them) |
+| `rows` | each changed row as `{ row, rowKey }`: its number as the sheet shows it, and the text column A shows in it; at most 500 |
+| `rowKey` | for a change within one row, that row's key, as in `gridcraft:selection` |
+
+- **What counts:** a cell's content, its constant, formula or Python code. A recalculated
+  result, a format or a column width is not a change.
+- **Undo and Redo** are changes too: the cells they put back are reported.
+- **Sorting** moves contents between rows: every row it changed is reported.
+- **The page's own commands are not reported** (`window.gridcraft.execute`, and anything sent
+  through the control channel): the page knows what it wrote.
+
+This message is GridCraft's own, like `gridcraft:selection`.
 
 ## Renderer selection
 

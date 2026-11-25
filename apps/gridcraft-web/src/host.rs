@@ -38,7 +38,7 @@ use craft_web_host::{Mode, message_type};
 use gridcraft_ui_egui::{Inbox, Services, SheetApp};
 use wasm_bindgen::JsValue;
 
-use crate::hostmode::{SelectionNote, SelectionWatch, open_name, selection_note};
+use crate::hostmode::{ChangeNote, SelectionNote, SelectionWatch, change_notes, open_name, selection_note};
 
 /// The app id in the host messages (`gridcraft:ready`).
 const APP: &str = "gridcraft";
@@ -127,6 +127,17 @@ impl Bridge {
         }
     }
 
+    /// After each frame: the host hears what a person changed since the last frame, one
+    /// `gridcraft:change` per command and sheet (`Session::changes`, which this turns on).
+    pub fn sync_changes(&self, app: &mut SheetApp) {
+        let changes = std::mem::take(app.session.changes.get_or_insert_with(Vec::new));
+        for note in change_notes(app, changes) {
+            if let Err(e) = self.notes.post_change(&note) {
+                log::warn!("couldn't tell the page what changed: {e:?}");
+            }
+        }
+    }
+
     /// After each frame: the host hears the selection when it changed (`gridcraft:selection`).
     /// `pointer_down` holds it back during a drag, which tells where it ended.
     pub fn sync_selection(&self, app: &SheetApp, pointer_down: bool) {
@@ -164,13 +175,41 @@ enum NoteTarget {
 
 impl NoteTarget {
     fn post_selection(&self, note: &SelectionNote) -> Result<(), JsValue> {
-        let kind = message_type(APP, "selection");
         let payload = js_sys::Object::new();
         let set = |key: &str, value: &str| js_sys::Reflect::set(&payload, &JsValue::from_str(key), &JsValue::from_str(value));
         set("sheet", &note.sheet)?;
         set("selection", &note.selection)?;
         set("activeCell", &note.active_cell)?;
         set("rowKey", &note.row_key)?;
+        self.post("selection", payload)
+    }
+
+    fn post_change(&self, note: &ChangeNote) -> Result<(), JsValue> {
+        let payload = js_sys::Object::new();
+        let set = |key: &str, value: JsValue| js_sys::Reflect::set(&payload, &JsValue::from_str(key), &value);
+        set("sheet", note.sheet.as_str().into())?;
+        set("range", note.range.as_str().into())?;
+        set("cells", note.cells.iter().map(|c| JsValue::from_str(c)).collect::<js_sys::Array>().into())?;
+        set("truncated", note.truncated.into())?;
+        let rows = js_sys::Array::new();
+        for (row, key) in &note.rows {
+            let r = js_sys::Object::new();
+            js_sys::Reflect::set(&r, &"row".into(), &JsValue::from(*row))?;
+            js_sys::Reflect::set(&r, &"rowKey".into(), &key.as_str().into())?;
+            rows.push(&r);
+        }
+        set("rows", rows.into())?;
+        // A change within one row also carries that row's key, as `gridcraft:selection` does.
+        if let [(_, key)] = note.rows.as_slice() {
+            set("rowKey", key.as_str().into())?;
+        }
+        self.post("change", payload)
+    }
+
+    /// Sends `payload` as the message `gridcraft:<kind>`.
+    fn post(&self, kind: &str, payload: js_sys::Object) -> Result<(), JsValue> {
+        let kind = message_type(APP, kind);
+        let set = |key: &str, value: &str| js_sys::Reflect::set(&payload, &JsValue::from_str(key), &JsValue::from_str(value));
         match self {
             Self::Parent { parent, origin } => {
                 set("type", &kind)?;

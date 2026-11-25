@@ -8,6 +8,7 @@
 
 pub mod catalog;
 pub mod cf;
+pub mod changes;
 mod chart_svg;
 mod clip_html;
 pub mod cmd;
@@ -542,6 +543,12 @@ pub struct Session {
     /// queries and the commands in [`view_only::ALLOWED`] and [`view_only::ENTRY`] run. Host code
     /// sets it; no command does.
     pub entry_only: bool,
+    /// When `Some`, each top-level command a person runs adds the cells it changed
+    /// ([`changes`]); a host takes them after each frame. `None` (the default) records nothing.
+    pub changes: Option<Vec<changes::Change>>,
+    /// The command running now was sent by a host page or an agent (the control channel), not
+    /// made by a person: it is not recorded in [`Session::changes`].
+    pub from_host: bool,
     /// Open undo groups, innermost last.
     groups: Vec<OpenGroup>,
     next_group: u64,
@@ -856,6 +863,10 @@ impl Session {
         // it leaves the group its step and makes one of its own for what it changed after the end.
         // A command that opened and closed its own groups makes one step of its own, which
         // replaces the steps those groups made.
+        // The workbook before a person's top-level command, for `changes` (the history below
+        // takes `before`).
+        let change_base =
+            before.as_ref().filter(|_| self.depth == 0 && !self.from_host && self.changes.is_some()).map(|(uid, wb, _)| (*uid, wb.clone()));
         let epoch_changed = self.group_epoch != group_epoch;
         let in_group_now = before.as_ref().is_some_and(|(uid, ..)| self.in_group(*uid));
         let was_open = start.is_some_and(|(was_open, _)| was_open);
@@ -918,6 +929,17 @@ impl Session {
             self.group_step = None;
         } else if let Some(uid) = doc_uid {
             self.bound_tail(uid);
+        }
+        // What a person changed, for a host that asked (`changes`): the cells whose content
+        // differs, Undo and Redo included. A host's or an agent's own command is not recorded.
+        if result.is_ok()
+            && let Some((uid, wb)) = &change_base
+            && let Some(d) = self.docs.iter().find(|d| d.uid == *uid && !Arc::ptr_eq(&d.wb, wb))
+        {
+            let found = changes::input_changes(*uid, wb, &d.wb);
+            if let Some(log) = self.changes.as_mut() {
+                log.extend(found);
+            }
         }
         result
     }
