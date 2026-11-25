@@ -538,6 +538,10 @@ pub struct Session {
     /// A host shows the workbooks for looking through, not for editing: only queries and the
     /// commands in [`view_only::ALLOWED`] run. Host code sets it; no command does.
     pub view_only: bool,
+    /// A host lets people fill in cells but not change the workbook's structure or formats:
+    /// queries and the commands in [`view_only::ALLOWED`] and [`view_only::ENTRY`] run. Host code
+    /// sets it; no command does.
+    pub entry_only: bool,
     /// Open undo groups, innermost last.
     groups: Vec<OpenGroup>,
     next_group: u64,
@@ -695,6 +699,11 @@ impl Session {
         // is its own work, so only the top-level call is checked.
         if self.view_only && self.depth == 0 && !view_only::allows_spec(spec) {
             return Err(EngineError::Disabled(id.to_string(), view_only::REFUSED.into()));
+        }
+        // An entry-only session also runs the commands that fill in cells (typing, pasting
+        // values, clearing, filling), the same for a person and a host page.
+        if self.entry_only && self.depth == 0 && !view_only::allows_entry_spec(spec) {
+            return Err(EngineError::Disabled(id.to_string(), view_only::ENTRY_REFUSED.into()));
         }
         if let Err(why) = (spec.enabled)(self) {
             return Err(EngineError::Disabled(id.to_string(), why));

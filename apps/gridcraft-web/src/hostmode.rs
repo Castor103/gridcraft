@@ -25,6 +25,11 @@ pub fn view_mode(mode: Option<&str>) -> bool {
     mode == Some("view")
 }
 
+/// `?mode=entry`: people fill in cells but change no structure or format (`Session::entry_only`).
+pub fn entry_mode(mode: Option<&str>) -> bool {
+    mode == Some("entry")
+}
+
 /// What `gridcraft:selection` tells the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectionNote {
@@ -94,6 +99,14 @@ mod tests {
     fn select(app: &mut SheetApp, range: &str) -> SelectionNote {
         app.session.execute("selection.set", json!({"range": range})).unwrap();
         selection_note(app).unwrap().1
+    }
+
+    #[test]
+    fn only_mode_entry_asks_for_an_entry_only_window() {
+        assert!(entry_mode(Some("entry")));
+        for other in [None, Some("view"), Some("Entry"), Some("")] {
+            assert!(!entry_mode(other), "{other:?} is not entry-only");
+        }
     }
 
     #[test]

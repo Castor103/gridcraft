@@ -79,6 +79,8 @@ Local test: `python3 -m http.server 8765` inside the folder, then open http://lo
   own Open or Save As cannot replace what the host thinks is open. Everything stays on by default.
 - **View-only:** `?mode=view` on the iframe `src` shows workbooks for looking through, not for
   editing: see [View-only windows](#view-only-windows-modeview).
+- **Entry-only:** `?mode=entry` lets people fill in cells and nothing else: see
+  [Entry-only windows](#entry-only-windows-modeentry).
 
 ### The parent bridge (`?host=parent`)
 
@@ -202,6 +204,29 @@ The commands a view-only window runs, besides queries: `selection.set`, `selecti
 `view.unfreezePanes`, `data.sortAscending`, `data.sortDescending`, `data.sort`, `data.filter`,
 `data.filterBy`, `data.clearFilter`, `data.reapply`, `home.columnWidth`,
 `home.autofitColumnWidth` and `file.open`.
+
+### Entry-only windows (`?mode=entry`)
+
+`?mode=entry` (alone, or with a host mode) makes a window where people fill in the cells of a
+workbook the page gives it, and change nothing else. Like view-only, it is set when the app
+starts and nothing in the app turns it off.
+
+- **Not drawn:** what a view-only window leaves out: the title bar, the ribbon, the File tab and
+  its Backstage view, the New sheet button and the sheet tab menu. The cell and header menus list
+  only what still runs.
+- **Works:** everything a view-only window does, and typing in cells (in the cell or the formula
+  bar), F2, picking from a cell's drop-down list, Paste, Clear Contents (Delete), filling down,
+  right, up and left and with the fill handle, check boxes, and Undo and Redo of those.
+- **Paste pastes values:** a copy brings no formats, comments or validation in.
+- **Refused:** inserting and deleting rows, columns and sheets, renaming or moving a sheet,
+  formats, Cut, Replace, protecting and unprotecting, saving, exporting and printing, with a
+  passing notice ("Only cell values can be entered in this workbook."). Sheet protection still
+  holds: a locked cell on a protected sheet is refused as always.
+- **The page is held to the same list,** with one more command: `data.validation`, so the page
+  can give cells their drop-down lists. `window.gridcraft.execute` runs queries, `range.setValues`
+  and `selection.set` as before.
+- **Saving:** `gridcraft:dirty` is sent as people edit; `gridcraft:save` is not, since Save is
+  refused. Read the values back with `sheet.read`.
 
 ### Hearing the selection (`gridcraft:selection`)
 

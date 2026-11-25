@@ -113,3 +113,42 @@ fn sorting_from_the_cell_menu_still_works_in_a_view_only_window() {
     assert_eq!(value(&h, "B2"), Value::Text("alpha".into()), "the rows are sorted by the clicked column");
     assert_eq!(value(&h, "A2"), Value::Number(2.0), "and each row keeps its cells together");
 }
+
+/// The same table in an entry-only window (`Session::entry_only`).
+fn entry_harness() -> Harness {
+    let mut session = Session::new();
+    session.new_workbook();
+    session.execute("range.setValues", json!({"range": "A1", "values": [["Row", "Task"], [1, "beta"], [2, "alpha"]]})).unwrap();
+    session.entry_only = true;
+    crate::support::harness(session, 4)
+}
+
+#[test]
+fn an_entry_only_window_hides_the_chrome_but_takes_typing() {
+    let mut h = entry_harness();
+    for label in ["AutoSave", "File", "Paste", "New sheet (⇧F11)"] {
+        assert!(h.query_by_label(label).is_none(), "an entry-only window does not draw {label}");
+    }
+    h.state_mut().session.execute("selection.set", json!({"range": "B2"})).unwrap();
+    h.run_steps(2);
+    h.input_mut().events.push(Event::Text("gamma".into()));
+    h.run_steps(2);
+    assert!(h.state().editor.is_some(), "typing starts an edit");
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(value(&h, "B2"), Value::Text("gamma".into()), "and Enter enters it");
+    key(&mut h, Key::B, Modifiers::COMMAND);
+    let bold = h.state_mut().session.run("cell.get", json!({"cell": "B3"})).unwrap()["style"]["font"]["bold"].clone();
+    assert_ne!(bold, json!(true), "a format shortcut is refused");
+}
+
+#[test]
+fn the_cell_menu_of_an_entry_only_window_lists_entering_but_not_structure() {
+    let mut h = entry_harness();
+    right_click(&mut h, "B2");
+    for kept in ["Copy", "Paste", "Clear Contents", "Sort A to Z", "Pick From Drop-down List…"] {
+        assert!(h.query_by_label(kept).is_some(), "the menu keeps {kept}");
+    }
+    for gone in ["Cut", "Insert…", "Delete…", "Format Cells…", "New Comment", "Define Name…"] {
+        assert!(h.query_by_label(gone).is_none(), "the menu leaves out {gone}");
+    }
+}

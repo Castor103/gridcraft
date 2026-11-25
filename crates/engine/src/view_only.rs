@@ -54,9 +54,40 @@ pub const ALLOWED: &[&str] = &[
     "file.open",
 ];
 
+/// Why a command is refused in an entry-only session.
+pub const ENTRY_REFUSED: &str = "Only cell values can be entered in this workbook.";
+
+/// Commands an entry-only session runs besides [`ALLOWED`] and queries: they fill in cells.
+/// Pasting pastes values there. `data.validation` sets a cell's list for a host page: nothing in
+/// an entry-only window opens its dialog.
+pub const ENTRY: &[&str] = &[
+    "cell.set",
+    "cell.toggleCheckbox",
+    "range.setValues",
+    "edit.beginEdit",
+    "edit.paste",
+    "edit.clearContents",
+    "edit.fillDown",
+    "edit.fillRight",
+    "edit.fillUp",
+    "edit.fillLeft",
+    "edit.autoFill",
+    "data.validation",
+];
+
 /// Whether a view-only session runs `spec`: a query, or one of [`ALLOWED`].
 pub fn allows_spec(spec: &CommandSpec) -> bool {
     (!spec.journal && !spec.undoable) || ALLOWED.contains(&spec.id)
+}
+
+/// Whether an entry-only session runs `spec`: what a view-only one runs, or one of [`ENTRY`].
+pub fn allows_entry_spec(spec: &CommandSpec) -> bool {
+    allows_spec(spec) || ENTRY.contains(&spec.id)
+}
+
+/// Whether an entry-only session runs the command `id`. An unknown id is not allowed.
+pub fn allows_entry(id: &str) -> bool {
+    crate::cmd::find_command(id).is_some_and(allows_entry_spec)
 }
 
 /// Whether a view-only session runs the command `id`. An unknown id is not allowed.
@@ -168,8 +199,63 @@ mod tests {
         assert!(info("sheet.read").enabled, "and so does a query");
     }
 
+    /// The table of `viewing`, entry-only instead.
+    fn entering() -> Session {
+        let mut s = viewing();
+        s.view_only = false;
+        s.entry_only = true;
+        s
+    }
+
+    #[test]
+    fn an_entry_only_session_fills_in_cells_but_keeps_the_structure_and_formats() {
+        let mut s = entering();
+        s.execute("cell.set", json!({"cell": "B2", "input": "typed"})).unwrap();
+        s.execute("range.setValues", json!({"range": "B3", "values": [["from the host"]]})).unwrap();
+        s.execute("edit.clearContents", json!({"range": "B4"})).unwrap();
+        let read = column(&mut s, "B2:B4");
+        assert_eq!(read["values"], json!([["typed"], ["from the host"], [null]]), "{read}");
+        s.execute("edit.undo", json!({})).unwrap();
+        let before = s.doc().unwrap().wb.clone();
+        for (id, params) in [
+            ("home.insertRows", json!({})),
+            ("home.deleteColumns", json!({})),
+            ("home.insertSheet", json!({"name": "Two"})),
+            ("sheet.rename", json!({"name": "Renamed"})),
+            ("home.bold", json!({"range": "A1"})),
+            ("home.rowHeight", json!({"rows": "2:2", "height": 40})),
+            ("review.unprotectSheet", json!({})),
+            ("file.save", json!({"path": "book.xlsx"})),
+            ("file.exportCsv", json!({"path": "book.csv"})),
+            ("edit.cut", json!({})),
+            ("edit.replace", json!({"what": "beta", "with": "x", "all": true})),
+        ] {
+            let err = s.execute(id, params).expect_err(id).to_string();
+            assert!(err.contains(ENTRY_REFUSED), "{id} says why it is refused: {err}");
+        }
+        assert!(Arc::ptr_eq(&s.doc().unwrap().wb, &before), "nothing changed the workbook");
+    }
+
+    #[test]
+    fn an_entry_only_session_pastes_values_without_the_copys_format() {
+        let mut s = entering();
+        s.entry_only = false;
+        s.execute("home.bold", json!({"range": "B2"})).unwrap();
+        s.entry_only = true;
+        s.execute("selection.set", json!({"range": "B2"})).unwrap();
+        s.execute("edit.copy", json!({})).unwrap();
+        s.execute("selection.set", json!({"range": "C2"})).unwrap();
+        s.execute("edit.paste", json!({})).unwrap();
+        let cell = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap();
+        assert_eq!(cell(&mut s, "C2")["value"], cell(&mut s, "B2")["value"], "the value comes over");
+        assert_ne!(cell(&mut s, "C2")["style"]["font"]["bold"], json!(true), "the bold does not");
+    }
+
     #[test]
     fn every_allowed_command_is_a_registered_command() {
+        for id in ENTRY {
+            assert!(crate::cmd::find_command(id).is_some(), "{id} is not a command");
+        }
         for id in ALLOWED {
             assert!(crate::cmd::find_command(id).is_some(), "{id} is not a command");
         }
