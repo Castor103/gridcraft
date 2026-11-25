@@ -30,6 +30,56 @@ pub fn entry_mode(mode: Option<&str>) -> bool {
     mode == Some("entry")
 }
 
+/// The most cells (and rows) one `gridcraft:change` lists; `range` still covers them all.
+pub const MAX_LISTED: usize = 500;
+
+/// What `gridcraft:change` tells the host: the cells one command of a person's changed on one
+/// sheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangeNote {
+    /// The sheet's name.
+    pub sheet: String,
+    /// The smallest range holding every changed cell, in A1 notation (`C7`, `B3:D9`).
+    pub range: String,
+    /// The changed cells in A1 notation, in row order, at most [`MAX_LISTED`].
+    pub cells: Vec<String>,
+    /// More cells changed than `cells` lists.
+    pub truncated: bool,
+    /// The changed rows (1-based, as the sheet numbers them) with the text column A shows in each
+    /// (the row's key, as in `gridcraft:selection`), at most [`MAX_LISTED`].
+    pub rows: Vec<(u32, String)>,
+}
+
+/// The notes for a person's changes (`Session::changes`), read against the workbooks as they are
+/// now. A change to a workbook that has closed since is dropped.
+pub fn change_notes(app: &SheetApp, changes: Vec<gridcraft_engine::changes::Change>) -> Vec<ChangeNote> {
+    let mut out = Vec::new();
+    for c in changes {
+        let Some(doc) = app.session.documents().iter().find(|d| d.uid == c.doc) else { continue };
+        let Some(sheet) = doc.wb.sheet(c.sheet_index) else { continue };
+        let (Some(first), Some(last)) = (c.cells.first(), c.cells.last()) else { continue };
+        let (mut top, mut left, mut bottom, mut right) = (first.row, first.col, last.row, first.col);
+        for cell in &c.cells {
+            left = left.min(cell.col);
+            right = right.max(cell.col);
+            top = top.min(cell.row);
+            bottom = bottom.max(cell.row);
+        }
+        let range = gridcraft_engine::core::RangeRef::new(CellRef::new(top, left), CellRef::new(bottom, right)).a1();
+        let mut rows: Vec<u32> = c.cells.iter().map(|cell| cell.row).collect();
+        rows.dedup();
+        let rows = rows
+            .into_iter()
+            .take(MAX_LISTED)
+            .map(|row| (row.saturating_add(1), gridcraft_engine::display::cell_text(&doc.wb, sheet, CellRef::new(row, 0))))
+            .collect();
+        let truncated = c.cells.len() > MAX_LISTED;
+        let cells = c.cells.iter().take(MAX_LISTED).map(|cell| cell.a1()).collect();
+        out.push(ChangeNote { sheet: c.sheet, range, cells, truncated, rows });
+    }
+    out
+}
+
 /// What `gridcraft:selection` tells the host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectionNote {
@@ -107,6 +157,40 @@ mod tests {
         for other in [None, Some("view"), Some("Entry"), Some("")] {
             assert!(!entry_mode(other), "{other:?} is not entry-only");
         }
+    }
+
+    /// The notes for what a person did to `app` with `run`.
+    fn notes_after(app: &mut SheetApp, run: impl FnOnce(&mut SheetApp)) -> Vec<ChangeNote> {
+        app.session.changes = Some(Vec::new());
+        run(app);
+        let changes = app.session.changes.take().unwrap_or_default();
+        change_notes(app, changes)
+    }
+
+    #[test]
+    fn a_change_note_names_the_cells_their_range_and_their_rows_keys() {
+        let mut app = app();
+        let notes = notes_after(&mut app, |app| {
+            app.session.execute("range.setValues", json!({"range": "B2", "values": [["gamma"], ["delta"]]})).unwrap();
+        });
+        let [note] = notes.as_slice() else { panic!("one sheet changed: {notes:?}") };
+        assert_eq!(note.range, "B2:B3");
+        assert_eq!(note.cells, ["B2", "B3"]);
+        assert_eq!(note.rows, [(2, "7".to_string()), (3, "3".to_string())], "each row with its column A");
+        assert!(!note.truncated);
+    }
+
+    #[test]
+    fn a_large_change_is_one_range_with_its_list_cut_short() {
+        let mut app = app();
+        let notes = notes_after(&mut app, |app| {
+            let values: Vec<Vec<i32>> = (0..300).map(|r| vec![r, r]).collect();
+            app.session.execute("range.setValues", json!({"range": "E1", "values": values})).unwrap();
+        });
+        let [note] = notes.as_slice() else { panic!("one sheet changed: {notes:?}") };
+        assert_eq!(note.range, "E1:F300");
+        assert!(note.truncated && note.cells.len() == MAX_LISTED, "600 cells, the first {MAX_LISTED} listed");
+        assert_eq!(note.rows.len(), 300, "every row is listed");
     }
 
     #[test]

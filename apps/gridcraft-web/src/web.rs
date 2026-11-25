@@ -80,6 +80,10 @@ pub fn start() {
                     app.session.view_only = crate::hostmode::view_mode(query_param("mode").as_deref());
                     // `?mode=entry`: people fill in cells; the structure and formats stay as they are.
                     app.session.entry_only = crate::hostmode::entry_mode(query_param("mode").as_deref());
+                    // A host hears which cells a person changed (`gridcraft:change`).
+                    if app_bridge.is_some() {
+                        app.session.changes = Some(Vec::new());
+                    }
                     // Follow the browser's language, except a CJK one. CJK coverage comes from
                     // optional craft-fonts input, not a guaranteed web font set, so a CJK browser
                     // cannot be assumed to render localized labels without tofu. Users can still
@@ -189,6 +193,7 @@ impl eframe::App for WebShell {
         self.app.ui(ui);
         if let Some(bridge) = &self.bridge {
             bridge.sync(&mut self.app);
+            bridge.sync_changes(&mut self.app);
             bridge.sync_selection(&self.app, ui.input(|i| i.pointer.any_down()));
         }
     }

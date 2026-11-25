@@ -114,6 +114,36 @@ impl CellStore {
                 .flat_map(move |(row, cols)| cols.range(r.start.col..=r.end.col).map(move |(col, cell)| (CellRef::new(*row, *col), cell)))
         })
     }
+    /// The cells for which `same` says this store and `before` differ, in row order; a cell one
+    /// store lacks counts as a default cell. Bands this store still shares with `before` (an undo
+    /// snapshot's, say) are skipped, so the cost is the bands an edit copied, not the sheet.
+    pub fn changed_from(&self, before: &CellStore, same: impl Fn(&Cell, &Cell) -> bool) -> Vec<CellRef> {
+        let blank = Cell::default();
+        let mut out = Vec::new();
+        let mut keys: Vec<u32> = self.bands.keys().chain(before.bands.keys()).copied().collect();
+        keys.sort_unstable();
+        keys.dedup();
+        for k in keys {
+            let (now, was) = (self.bands.get(&k), before.bands.get(&k));
+            if let (Some(a), Some(b)) = (now, was)
+                && Arc::ptr_eq(a, b)
+            {
+                continue;
+            }
+            let mut cells: Vec<CellRef> = now
+                .into_iter()
+                .chain(was)
+                .flat_map(|band| band.rows.iter().flat_map(|(row, cols)| cols.keys().map(move |col| CellRef::new(*row, *col))))
+                .collect();
+            cells.sort_unstable_by_key(|c| (c.row, c.col));
+            cells.dedup();
+            fn at(band: Option<&Arc<Band>>, c: CellRef) -> Option<&Cell> {
+                band?.rows.get(&c.row)?.get(&c.col)
+            }
+            out.extend(cells.into_iter().filter(|c| !same(at(now, *c).unwrap_or(&blank), at(was, *c).unwrap_or(&blank))));
+        }
+        out
+    }
     pub fn iter(&self) -> impl Iterator<Item = (CellRef, &Cell)> + '_ {
         self.bands
             .values()
@@ -491,6 +521,29 @@ mod tests {
 
     fn c(r: u32, col: u32) -> CellRef {
         CellRef::new(r, col)
+    }
+
+    #[test]
+    fn changed_from_finds_the_cells_an_edit_changed_and_skips_shared_bands() {
+        let mut before = CellStore::new();
+        for row in [0, 1, 200, 5_000] {
+            before.set(c(row, 0), Cell::value(f64::from(row).into()));
+        }
+        let mut now = before.clone();
+        assert!(now.changed_from(&before, |a, b| a == b).is_empty(), "a copy changed nothing");
+        now.set(c(1, 0), Cell::value("new".into()));
+        now.set(c(1, 3), Cell::value(7.0.into()));
+        now.remove(c(5_000, 0));
+        assert_eq!(now.changed_from(&before, |a, b| a == b), vec![c(1, 0), c(1, 3), c(5_000, 0)]);
+        // A comparison that ignores values sees no change.
+        assert!(now.changed_from(&before, |_, _| true).is_empty());
+        // The band holding row 200 was never copied: it is not visited.
+        let visited = std::cell::Cell::new(0);
+        now.changed_from(&before, |a, b| {
+            visited.set(visited.get() + 1);
+            a == b
+        });
+        assert!(visited.get() < 6, "only the two copied bands' cells are compared, not row 200's: {}", visited.get());
     }
 
     #[test]

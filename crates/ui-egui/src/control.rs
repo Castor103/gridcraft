@@ -518,7 +518,11 @@ pub fn poll(app: &mut SheetApp, ctx: &egui::Context) {
         if !req.take() {
             continue;
         }
+        // What a control channel or a host page runs is not a person's change
+        // (`Session::changes`): the caller knows what it wrote.
+        app.session.from_host = true;
         let outcome = handle(app, ctx, &req.method, &req.params);
+        app.session.from_host = false;
         match outcome {
             Outcome::Done(v) => {
                 let _ = req.reply.send(v);

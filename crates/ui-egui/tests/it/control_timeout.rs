@@ -59,3 +59,22 @@ fn taking_and_abandoning_a_request_settle_once() {
     assert!(ControlRequest::abandon(&given_up.state), "and again is the same answer");
     assert!(!given_up.take(), "it cannot then be taken");
 }
+
+/// A command a host page or an agent sends through the control channel is not a person's
+/// change: `Session::changes` (what a host hears as `gridcraft:change`) leaves it out, and a
+/// person's edit afterwards is recorded again.
+#[test]
+fn a_control_channel_command_is_not_recorded_as_a_persons_change() {
+    let (mut app, ctx) = app();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.control_rx = Some(rx);
+    app.session.changes = Some(Vec::new());
+    let (req, reply) = ControlRequest::new("engine.execute", set_a1("from the host"));
+    tx.send(req).unwrap();
+    gridcraft_ui_egui::control::poll(&mut app, &ctx);
+    assert!(reply.try_recv().is_ok());
+    assert_eq!(a1(&app), "Text(\"from the host\")");
+    assert_eq!(app.session.changes.as_ref().map(Vec::len), Some(0), "the host's own write is not reported");
+    app.run("cell.set", json!({"cell": "A1", "input": "typed"})).unwrap();
+    assert_eq!(app.session.changes.as_ref().map(Vec::len), Some(1), "a person's edit is");
+}
