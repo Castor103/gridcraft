@@ -232,10 +232,10 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     }
 }
 
-/// A menu's entries as a window lists them: all of them, or in a view-only window those the
-/// session still runs (`SheetApp::lists`), with no separator left first, last or doubled.
+/// A menu's entries as a window lists them: all of them, or in a view-only or entry-only window
+/// those the session still runs (`SheetApp::lists`), with no separator left first, last or doubled.
 fn view_only_items<'a>(app: &SheetApp, items: Vec<(&'a str, &'a str)>) -> Vec<(&'a str, &'a str)> {
-    if !app.view_only() {
+    if !app.host_limited() {
         return items;
     }
     let mut kept: Vec<(&str, &str)> = Vec::new();

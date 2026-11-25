@@ -105,8 +105,8 @@ impl SheetApp {
     /// `logic` so a hidden or logic-only frame still saves; the monotonic timestamp check keeps a
     /// forced hidden UI pass from saving the same change twice.
     pub(super) fn autosave(&mut self, ctx: &egui::Context) {
-        // A view-only session refuses every save: do not ask again every two seconds.
-        if self.session.view_only {
+        // A view-only or entry-only session refuses every save: do not ask again every two seconds.
+        if self.host_limited() {
             return;
         }
         let dirty_xlsx = self.session.active().is_some_and(|d| d.is_dirty() && d.path.as_deref().is_some_and(|p| p.ends_with(".xlsx")));

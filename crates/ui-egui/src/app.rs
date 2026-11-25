@@ -215,9 +215,9 @@ impl SheetApp {
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, &ctx);
         let t = theme::Tokens::get(&ctx);
-        // A view-only window (`Session::view_only`) draws no title bar, ribbon or File view, and
-        // takes no key tips for them: what is left is the sheet to look through.
-        let view_only = self.view_only();
+        // A view-only or entry-only window (`Session::view_only`, `Session::entry_only`) draws no
+        // title bar, ribbon or File view, and takes no key tips for them: what is left is the sheet.
+        let view_only = self.host_limited();
         // A host can turn the File tab off while Backstage is already open: close it.
         if !self.chrome.file_tab || view_only {
             self.backstage = None;

@@ -271,7 +271,9 @@ pub(super) fn paste(s: &mut Session, p: &Json) -> Result<Json> {
     if s.clipboard.is_none() {
         return Err(EngineError::Other("Nothing to paste.".into()));
     }
-    paste_special(s, &json!({"what": "all", "at": p.get("at").cloned().unwrap_or(Json::Null)}))
+    // An entry-only session fills in values: a copy brings no formats, comments or validation.
+    let what = if s.entry_only { "values" } else { "all" };
+    paste_special(s, &json!({"what": what, "at": p.get("at").cloned().unwrap_or(Json::Null)}))
 }
 
 /// Drag and drop (dragging the selection's border): moves `range` so its top-left cell lands on

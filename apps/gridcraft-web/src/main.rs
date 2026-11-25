@@ -18,8 +18,9 @@
 //! (`api`).
 //! `?chrome=none|notitlebar|nofiletab` leaves the title bar and/or the File tab undrawn for a host
 //! that embeds the sheet in its own window (see `Chrome`). `?mode=view` makes the window
-//! view-only: no ribbon, no edits, no saves (`Session::view_only`). Preferences (theme, interface
-//! size, editing options…) are kept in `localStorage` (`prefs`).
+//! view-only: no ribbon, no edits, no saves (`Session::view_only`); `?mode=entry` lets people
+//! fill in cells and nothing else (`Session::entry_only`). Preferences (theme, interface size,
+//! editing options…) are kept in `localStorage` (`prefs`).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(any(target_arch = "wasm32", test))]

@@ -11,6 +11,12 @@ const VIEW_ONLY_DIALOGS: &[&str] = &["find", "goTo", "goToSpecial", "sort", "col
 /// link or open the Column Width dialog.
 const VIEW_ONLY_ENTRIES: &[&str] = &["ui:filterValue", "ui:openLink", "ui:columnWidth"];
 
+/// What an entry-only window opens besides [`VIEW_ONLY_DIALOGS`]: the cell's drop-down list.
+const ENTRY_ONLY_DIALOGS: &[&str] = &["pickList"];
+
+/// The menus' own entries an entry-only window keeps besides [`VIEW_ONLY_ENTRIES`].
+const ENTRY_ONLY_ENTRIES: &[&str] = &["ui:pickList"];
+
 impl SheetApp {
     /// Runs an engine command (or a UI command) and handles UI requests it makes.
     pub fn run(&mut self, id: &str, params: Json) -> Result<Json, String> {
@@ -390,22 +396,37 @@ impl SheetApp {
         self.session.view_only
     }
 
-    /// Whether a menu lists the entry `id` (a command id, or a menu's own `ui:` id): every entry
-    /// in an ordinary window, and in a view-only one those the session still runs.
-    pub(crate) fn lists(&self, id: &str) -> bool {
-        !self.session.view_only || VIEW_ONLY_ENTRIES.contains(&id) || gridcraft_engine::view_only::allows(id)
+    /// Whether a host limits what the window does, view-only or entry-only
+    /// (`Session::entry_only`): either way the title bar, the ribbon and the File view are not
+    /// drawn, sheets are not added, renamed or moved, and the menus list only what still runs.
+    pub fn host_limited(&self) -> bool {
+        self.session.view_only || self.session.entry_only
     }
 
-    /// Tells the person that the window is view-only, where a refused command would.
+    /// Whether a menu lists the entry `id` (a command id, or a menu's own `ui:` id): every entry
+    /// in an ordinary window, and in a view-only or entry-only one those the session still runs.
+    pub(crate) fn lists(&self, id: &str) -> bool {
+        if self.session.view_only {
+            return VIEW_ONLY_ENTRIES.contains(&id) || gridcraft_engine::view_only::allows(id);
+        }
+        if self.session.entry_only {
+            return VIEW_ONLY_ENTRIES.contains(&id) || ENTRY_ONLY_ENTRIES.contains(&id) || gridcraft_engine::view_only::allows_entry(id);
+        }
+        true
+    }
+
+    /// Tells the person what the window refuses, where a refused command would.
     pub(crate) fn say_view_only(&mut self) {
-        self.toast = Some((gridcraft_engine::view_only::REFUSED.into(), now_ms()));
+        let why = if self.session.view_only { gridcraft_engine::view_only::REFUSED } else { gridcraft_engine::view_only::ENTRY_REFUSED };
+        self.toast = Some((why.into(), now_ms()));
     }
 
     pub fn open_dialog(&mut self, name: &str, params: Json) {
         // A view-only window opens the dialogs of what it still does (Find, Go To, Sort, Column
         // Width). Any other would only collect input for a command the session refuses, and
         // Open or Save As would bring in or hand out a file the host did not ask for.
-        if self.session.view_only && !VIEW_ONLY_DIALOGS.contains(&name) {
+        let opens = VIEW_ONLY_DIALOGS.contains(&name) || (self.session.entry_only && ENTRY_ONLY_DIALOGS.contains(&name));
+        if self.host_limited() && !opens {
             self.say_view_only();
             return;
         }
@@ -497,7 +518,7 @@ impl SheetApp {
     /// Opens the File tab's Backstage view on `page`, committing a cell still being edited first
     /// (File actions work on the whole workbook). A draft that can't be committed keeps the sheet.
     pub fn open_backstage(&mut self, page: backstage::Page) {
-        if !self.chrome.file_tab || self.session.view_only {
+        if !self.chrome.file_tab || self.host_limited() {
             return;
         }
         if !self.commit_edit(0, 0, false, false) {
